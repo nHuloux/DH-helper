@@ -1,0 +1,58 @@
+:root { --tq:#179AAF; --tq-f:#0e7384; --an:#363636; --ja:#FFCF00; --gr:#f3f5f7; --bd:#d8dde2; --ok:#2e9d4f; --err:#d33; --warn:#a67c00; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; font: 14px/1.4 system-ui, 'Segoe UI', Roboto, sans-serif; color: var(--an); display: flex; flex-direction: column; overflow: hidden; background: #fff; }
+header { display: flex; align-items: center; gap: 12px; padding: 6px 14px; border-bottom: 1px solid var(--bd); background: #fff; flex: none; }
+header img { height: 26px; }
+header h1 { font-size: 16px; margin: 0; color: var(--tq); font-weight: 650; white-space: nowrap; }
+header .nom { color: #666; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+header .esp { flex: 1; }
+main { flex: 1; display: flex; min-height: 0; }
+#vue { flex: 1; min-width: 0; position: relative; }
+#vue canvas { display: block; width: 100%; height: 100%; }
+#pick { position: absolute; left: 10px; top: 8px; background: rgba(255,255,255,.92); border: 1px solid var(--bd); border-radius: 6px; padding: 3px 9px; font-size: 12.5px; font-variant-numeric: tabular-nums; display: none; pointer-events: none; }
+#chargement { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(255,255,255,.75); font-weight: 600; color: var(--tq-f); }
+#panel { width: 430px; border-left: 1px solid var(--bd); overflow-y: auto; padding: 4px 14px 20px; background: #fff; }
+.sub { color: #777; font-size: 12px; margin: 8px 0; }
+h2 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; margin: 18px 0 6px; color: #666; border-bottom: 1px solid var(--bd); padding-bottom: 3px; }
+.bar { display: flex; flex-wrap: wrap; gap: 4px; }
+button, select { font: inherit; border: 1px solid var(--bd); background: var(--gr); border-radius: 6px; padding: 4px 9px; cursor: pointer; color: inherit; }
+button:hover, select:hover { border-color: var(--tq); }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--tq); outline-offset: 1px; }
+button.on { background: var(--tq); color: #fff; border-color: var(--tq); }
+button.f { min-width: 38px; font-weight: 600; }
+button.f.ok { border-color: var(--ok); color: var(--ok); } button.f.err { border-color: var(--err); color: var(--err); } button.f.warn { border-color: #d9a400; color: var(--warn); }
+button.f.cur { background: var(--an); color: #fff; border-color: var(--an); }
+button.principal { background: var(--tq); color: #fff; border-color: var(--tq); }
+.row { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+.row label { width: 70px; color: #555; flex: none; }
+input[type=number] { width: 78px; padding: 3px 5px; border: 1px solid var(--bd); border-radius: 5px; font: inherit; }
+input[type=range] { flex: 1; accent-color: var(--tq); min-width: 0; }
+.log { font-size: 12.5px; margin: 6px 0; } .log > div { padding: 2px 0; }
+.ok { color: var(--ok); } .err { color: var(--err); } .warn { color: var(--warn); } .todo { color: #888; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { border: 1px solid var(--bd); padding: 3px 6px; text-align: right; } th { background: var(--gr); font-weight: 600; }
+.pre { white-space: pre-wrap; background: var(--gr); border-radius: 6px; padding: 8px; font-size: 12.5px; }
+.hint { font-size: 12px; color: #666; }
+.box { border: 1px solid var(--bd); border-radius: 8px; padding: 6px 9px; margin: 6px 0; }
+.box .bt { font-weight: 600; margin-bottom: 2px; }
+textarea { width: 100%; min-height: 110px; font: 12.5px/1.35 ui-monospace, Menlo, Consolas, monospace; border: 1px solid var(--bd); border-radius: 6px; padding: 6px; }
+details summary { cursor: pointer; color: #444; margin: 4px 0; }
+#toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--an); color: #fff; padding: 8px 14px; border-radius: 8px; font-size: 13px; display: none; max-width: 80vw; z-index: 50; }
+/* fenêtre de chargement */
+#dlg { position: fixed; inset: 0; background: rgba(30,30,30,.45); display: none; align-items: center; justify-content: center; z-index: 40; padding: 12px; }
+#dlg .carte { background: #fff; border-radius: 12px; width: min(760px, 100%); max-height: 94vh; overflow: auto; padding: 18px 22px; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+#dlg h2 { margin-top: 0; border: 0; font-size: 18px; text-transform: none; letter-spacing: 0; color: var(--tq); }
+#dlg h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: #666; margin: 16px 0 6px; }
+.exemples { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+.exemples button { text-align: left; padding: 8px 10px; background: #fff; }
+.exemples button b { display: block; color: var(--tq-f); } .exemples button span { font-size: 12px; color: #666; }
+#depot { border: 2px dashed #b9c2cb; border-radius: 12px; padding: 20px 14px; text-align: center; color: #555; background: var(--gr); }
+#depot.sur { border-color: var(--tq); background: #e6f6f8; }
+#choixurdf button { display: block; width: 100%; text-align: left; margin: 3px 0; }
+.msgdlg { margin-top: 10px; font-size: 13px; }
+.msgdlg.err { color: var(--err); }
+@media (max-width: 900px) {
+  body { overflow: auto; } main { flex-direction: column; }
+  #vue { flex: none; height: 56vh; } #panel { width: 100%; border-left: 0; border-top: 1px solid var(--bd); overflow: visible; }
+}

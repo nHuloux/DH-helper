@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atelier DH — repères de Denavit-Hartenberg à partir d'un URDF</title>
+<meta name="description" content="Outil pédagogique : placez les repères de Denavit-Hartenberg sur n'importe quel robot sériel à partir de son fichier URDF. Fonctionne entièrement dans le navigateur.">
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="img/logo_mira.png">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/build/three.module.js", "three/addons/": "./vendor/three/examples/jsm/" } }
+</script>
+<script src="vendor/jszip/jszip.min.js"></script>
+</head>
+<body>
+<header>
+  <img src="img/logo_mira.png" alt="MIRA">
+  <h1>Atelier DH</h1><span class="nom" id="nom"></span>
+  <span class="esp"></span>
+  <button id="bAutre">Changer de robot</button>
+</header>
+<main>
+  <div id="vue"><div id="pick"></div><div id="chargement">Chargement des maillages…</div></div>
+  <div id="panel">
+    <div class="sub">Convention standard : A<sub>i</sub> = Rot(z,θ) Trans(z,d) Trans(x,r) Rot(x,α) · mm et degrés</div>
+    <div id="branche" style="display:none" class="row"><label style="width:auto">Chaîne jusqu'à</label><select id="tip"></select></div>
+
+    <h2>Affichage</h2>
+    <div class="bar"><button id="bAxes" class="on">Axes articulaires</button><button id="bFr" class="on">Repères</button><button id="bVue">Recadrer</button><button id="bPng">Image PNG</button></div>
+    <div class="row"><label>Opacité</label><input type="range" id="opac" min="0.1" max="1" step="0.05" value="0.45" aria-label="Opacité du robot"></div>
+    <details><summary>Explorer le robot (articulations)</summary><div id="sliders"></div><div class="bar"><button id="bZero">q = 0</button></div>
+      <div class="hint">Les repères sont définis robot à q = 0 ; en bougeant, ils suivent les segments.</div></details>
+
+    <h2>Repères</h2>
+    <div class="sub" id="rep0"></div>
+    <div class="bar" id="fbar"></div>
+    <div id="edit">
+      <div class="box"><div class="bt">Origine <span id="tO"></span></div>
+        <div id="oForce" class="hint" style="display:none"></div>
+        <div id="oLibre"><div class="row"><input type="range" id="ts" min="-500" max="500" step="0.5" value="0" aria-label="Position de l'origine sur l'axe"><input type="number" id="tn" step="0.1"> mm</div>
+          <div class="hint">Faites glisser pour déplacer O<sub id="ti">i</sub> le long de l'axe z<sub id="ti2">i</sub> (en pointillés) ; la position est mesurée depuis le point de référence de l'axe.</div></div>
+        <div class="hint" id="oCoord"></div></div>
+      <div class="box"><div class="bt">Direction de l'axe x <span id="tX"></span></div>
+        <div id="xAttente" class="hint" style="display:none">Placez d'abord l'origine.</div>
+        <div id="xForce" style="display:none"><div class="hint" id="xForceTxt"></div><div class="bar"><button id="xSign">Inverser le sens de x</button></div></div>
+        <div id="xLibre" style="display:none"><div class="row"><input type="range" id="ps" min="-180" max="180" step="1" value="0" aria-label="Angle de x"><input type="number" id="pn" step="0.5" style="width:70px"> °</div>
+          <div class="hint">Angle de x<sub class="xi">i</sub> par rapport à x<sub class="xp">i-1</sub>, autour de z<sub class="zp">i-1</sub> (x<sub class="xi">i</sub> reste perpendiculaire à z<sub class="zp">i-1</sub>).</div></div></div>
+      <div class="bar"><button id="vide">Réinitialiser ce repère</button><button id="videTout">Tout réinitialiser</button></div>
+    </div>
+    <div class="row"><label>Tolérance</label><input type="number" id="tpos" value="10" step="1" style="width:56px"> mm <input type="number" id="tang" value="6" step="1" style="width:46px"> °</div>
+    <div class="log" id="log" aria-live="polite"></div>
+
+    <h2>Tableau DH</h2>
+    <table id="tab"><thead><tr><th>i</th><th>θ₀ (°)</th><th>d (mm)</th><th>r (mm)</th><th>α (°)</th></tr></thead><tbody></tbody></table>
+    <div class="bar" style="margin-top:6px"><button data-ex="csv">CSV</button><button data-ex="json">JSON</button><button data-ex="tex">LaTeX</button><button id="cp">Copier</button></div>
+
+    <div id="secAide"><h2>Aide</h2>
+      <div class="bar" id="abar"></div><div class="pre" id="aide" style="margin-top:6px;display:none"></div></div>
+
+    <h2>Vérifier un tableau DH</h2>
+    <details><summary>Coller le tableau d'un étudiant (θ₀ d r α, une ligne par articulation)</summary>
+      <textarea id="tabEtu" spellcheck="false" placeholder="0  267  0  -90&#10;-79.35  0  289.49  0&#10;…"></textarea>
+      <div class="bar" style="margin-top:4px"><button id="bVerif" class="principal">Vérifier</button></div>
+      <div class="pre" id="rapport" style="margin-top:6px;display:none"></div>
+      <div class="hint">Le test compare, pour des positions articulaires aléatoires, les repères du tableau à ceux de l'URDF : le tableau est validé s'il reproduit la même cinématique (θ₀ doit être l'angle à q = 0).</div>
+    </details>
+
+    <div id="prof" style="display:none"><h2>Enseignant</h2><div class="bar"><button id="bSol">Charger la solution de référence</button></div></div>
+    <p class="hint" style="margin-top:20px">Vos fichiers restent dans votre navigateur : rien n'est envoyé sur un serveur.</p>
+  </div>
+</main>
+
+<div id="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgTitre">
+  <div class="carte">
+    <h2 id="dlgTitre">Choisir un robot</h2>
+    <h3>Robots d'exemple</h3>
+    <div class="exemples" id="exemples"></div>
+    <h3>Votre robot</h3>
+    <div id="depot">
+      <p style="margin:0 0 8px"><b>Déposez ici</b> le dossier du robot (fichier <code>.urdf</code> + maillages <code>.stl</code>, <code>.dae</code>, <code>.obj</code>, <code>.glb</code>) ou une archive <code>.zip</code>.</p>
+      <div class="bar" style="justify-content:center">
+        <button id="bDossier">Choisir un dossier…</button><button id="bFichiers">Choisir des fichiers / un .zip…</button>
+      </div>
+      <input type="file" id="inDossier" webkitdirectory multiple hidden>
+      <input type="file" id="inFichiers" multiple hidden accept=".urdf,.zip,.stl,.obj,.dae,.glb,.gltf,.xacro">
+    </div>
+    <div id="choixurdf" style="display:none"></div>
+    <div class="msgdlg" id="msgdlg"></div>
+    <p class="hint" style="margin-bottom:0">Chaînes sérielles à articulations rotoïdes. Les URDF issus de xacro doivent d'abord être convertis (<code>xacro robot.urdf.xacro &gt; robot.urdf</code>). Les maillages sont retrouvés même avec des chemins <code>package://…</code> tant qu'ils sont dans le dossier ou le zip déposé.</p>
+    <div class="bar" style="justify-content:flex-end;margin-top:8px"><button id="bFermer" style="display:none">Fermer</button></div>
+  </div>
+</div>
+<div id="toast" role="status"></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

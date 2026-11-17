@@ -1,0 +1,60 @@
+[
+ {
+  "id": "xarm6",
+  "nom": "UFactory xArm 6",
+  "description": "6 axes · robot du cours (UE3)",
+  "dossier": "xarm6",
+  "fichiers": [
+   "meshes/link1.stl",
+   "meshes/link2.stl",
+   "meshes/link3.stl",
+   "meshes/link4.stl",
+   "meshes/link5.stl",
+   "meshes/link6.stl",
+   "meshes/link_base.stl",
+   "xarm6.urdf"
+  ]
+ },
+ {
+  "id": "xarm7",
+  "nom": "UFactory xArm 7",
+  "description": "7 axes · bras redondant",
+  "dossier": "xarm7",
+  "fichiers": [
+   "meshes/link1.stl",
+   "meshes/link2.stl",
+   "meshes/link3.stl",
+   "meshes/link4.stl",
+   "meshes/link5.stl",
+   "meshes/link6.stl",
+   "meshes/link7.stl",
+   "meshes/link_base.stl",
+   "xarm7.urdf"
+  ]
+ },
+ {
+  "id": "lite6",
+  "nom": "UFactory Lite 6",
+  "description": "6 axes · poignet à axes sécants",
+  "dossier": "lite6",
+  "fichiers": [
+   "lite6.urdf",
+   "meshes/link1.stl",
+   "meshes/link2.stl",
+   "meshes/link3.stl",
+   "meshes/link4.stl",
+   "meshes/link5.stl",
+   "meshes/link6.stl",
+   "meshes/link_base.stl"
+  ]
+ },
+ {
+  "id": "ur5",
+  "nom": "Universal Robots UR5",
+  "description": "6 axes · géométrie simplifiée (primitives)",
+  "dossier": "ur5",
+  "fichiers": [
+   "ur5.urdf"
+  ]
+ }
+]
