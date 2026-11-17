@@ -56,5 +56,54 @@
   "fichiers": [
    "ur5.urdf"
   ]
+ },
+ {
+  "id": "tx60",
+  "nom": "Stäubli TX60",
+  "description": "6 axes · épaule décalée (ROS-Industrial, Apache 2.0)",
+  "dossier": "tx60",
+  "fichiers": [
+   "staubli_tx60_support/meshes/tx60/visual/base_link.stl",
+   "staubli_tx60_support/meshes/tx60/visual/link_1.stl",
+   "staubli_tx60_support/meshes/tx60/visual/link_2.stl",
+   "staubli_tx60_support/meshes/tx60/visual/link_3.stl",
+   "staubli_tx60_support/meshes/tx60/visual/link_4.stl",
+   "staubli_tx60_support/meshes/tx60/visual/link_5.stl",
+   "staubli_tx60_support/meshes/tx60/visual/link_6.stl",
+   "tx60.urdf"
+  ]
+ },
+ {
+  "id": "tx90",
+  "nom": "Stäubli TX90",
+  "description": "6 axes · épaule décalée (ROS-Industrial, Apache 2.0)",
+  "dossier": "tx90",
+  "fichiers": [
+   "staubli_tx90_support/meshes/tx90/visual/base_link.stl",
+   "staubli_tx90_support/meshes/tx90/visual/link_1.stl",
+   "staubli_tx90_support/meshes/tx90/visual/link_2.stl",
+   "staubli_tx90_support/meshes/tx90/visual/link_3.stl",
+   "staubli_tx90_support/meshes/tx90/visual/link_4.stl",
+   "staubli_tx90_support/meshes/tx90/visual/link_5.stl",
+   "staubli_tx90_support/meshes/tx90/visual/link_6.stl",
+   "tx90.urdf"
+  ]
+ },
+ {
+  "id": "kinova_gen3_6dof",
+  "nom": "Kinova Gen3 6 axes",
+  "description": "6 axes · poignet sphérique (Kinova ros2_kortex, BSD)",
+  "dossier": "kinova_gen3_6dof",
+  "fichiers": [
+   "gen3_6dof.urdf",
+   "kortex_description/arms/gen3/6dof/meshes/base_link.STL",
+   "kortex_description/arms/gen3/6dof/meshes/bicep_link.STL",
+   "kortex_description/arms/gen3/6dof/meshes/bracelet_no_vision_link.STL",
+   "kortex_description/arms/gen3/6dof/meshes/bracelet_with_vision_link.STL",
+   "kortex_description/arms/gen3/6dof/meshes/forearm_link.STL",
+   "kortex_description/arms/gen3/6dof/meshes/shoulder_link.STL",
+   "kortex_description/arms/gen3/6dof/meshes/spherical_wrist_1_link.STL",
+   "kortex_description/arms/gen3/6dof/meshes/spherical_wrist_2_link.STL"
+  ]
  }
 ]

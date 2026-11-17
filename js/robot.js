@@ -414,7 +414,10 @@ export class Robot {
   // ---------------------------------------------------------------- validation d'un tableau DH externe
   validerTableau(T, nTests = 15, tolMm = 0.5, tolDeg = 0.1) {
     if (!Array.isArray(T) || T.length !== this.n || T.some((l) => l.length !== 4)) return { ok: false, rapport: [`Le tableau doit avoir ${this.n} lignes de 4 valeurs (θ0, d, r, α).`] };
-    const dhFk = (q) => { let M = I4(); return T.map((l, k) => (M = mat4Mul(M, matriceDH(l[0] + q[k], l[1], l[2], l[3])))); };
+    // repère 0 imposé (pas toujours confondu avec la base : z0 est l'axe de l'articulation 1, parfois orienté vers le bas)
+    const { O: O0, x: x0, z: z0 } = this.REP0, y0 = cross(z0, x0);
+    const B = mat4From([x0[0], y0[0], z0[0], x0[1], y0[1], z0[1], x0[2], y0[2], z0[2]], O0);
+    const dhFk = (q) => { let M = B.slice(); return T.map((l, k) => (M = mat4Mul(M, matriceDH(l[0] + q[k], l[1], l[2], l[3])))); };
     let graine = 12345;
     const alea = () => { graine = (graine * 1664525 + 1013904223) % 4294967296; return graine / 4294967296; };
     const T0 = dhFk(new Array(this.n).fill(0));

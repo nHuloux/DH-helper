@@ -3,6 +3,7 @@ import { Viewer } from './viewer.js';
 import { lireURDF, Robot, formaterTableau } from './robot.js';
 import { depuisListe, depuisDepot, depuisExemple, dossierDe } from './files.js';
 import { chargerGeometrie } from './meshes.js';
+import { argumentsXacro, xacroVersUrdf } from './xacro.js';
 
 const $ = (id) => document.getElementById(id);
 const parametres = new URLSearchParams(location.search);
@@ -28,7 +29,7 @@ function toast(msg, ms = 4500) {
 
 // ------------------------------------------------------------------ fenêtre de chargement
 function ouvrirDlg(message = '') {
-  $('dlg').style.display = 'flex'; $('choixurdf').style.display = 'none';
+  $('dlg').style.display = 'flex'; $('choixurdf').style.display = 'none'; $('xacroForm').style.display = 'none';
   $('bFermer').style.display = E.robot ? '' : 'none';
   setMsg(message);
 }
@@ -36,31 +37,79 @@ function fermerDlg() { $('dlg').style.display = 'none'; }
 function setMsg(texte, erreur = false) { const m = $('msgdlg'); m.textContent = texte; m.className = 'msgdlg' + (erreur ? ' err' : ''); }
 
 async function ouvrirStore(store) {
-  setMsg('');
+  setMsg(''); $('xacroForm').style.display = 'none';
   if (!store.taille) { setMsg('Aucun fichier reçu.', true); return; }
   const urdfs = store.urdfs();
-  if (!urdfs.length) {
-    setMsg(store.xacros().length ? 'Ce dossier contient un fichier xacro mais pas d\'URDF : convertissez-le d\'abord (xacro robot.urdf.xacro > robot.urdf), puis déposez le résultat avec les maillages.' : 'Aucun fichier .urdf trouvé dans ce dépôt.', true);
-    return;
-  }
-  if (urdfs.length === 1) { await charger(store, urdfs[0]); return; }
+  // xacro : ceux qui déclarent des arguments et une racine <robot> sont des fichiers « principaux » ; les autres sont des morceaux inclus
+  const xacros = await Promise.all(store.xacros().map(async (f) => {
+    let principal = false;
+    try { if (f.taille < 400000) { const t = await store.texte(f); principal = /<robot\b/.test(t) && !/<xacro:macro\b/.test(t.slice(0, 1500)) && (/<xacro:arg\b/.test(t) || /<link\b/.test(t) || /<xacro:include\b/.test(t)); } } catch (e) { principal = false; }
+    return Object.assign(f, { principal });
+  }));
+  xacros.sort((x, y) => Number(y.principal) - Number(x.principal) || Number(/\.urdf\.xacro$/i.test(y.chemin)) - Number(/\.urdf\.xacro$/i.test(x.chemin)) || x.chemin.localeCompare(y.chemin));
+  const candidats = [...urdfs, ...xacros];
+  if (!candidats.length) { setMsg('Aucun fichier .urdf ni .xacro trouvé dans ce dépôt.', true); return; }
+  if (candidats.length === 1) { await ouvrirCandidat(store, candidats[0]); return; }
   const z = $('choixurdf'); z.style.display = 'block';
-  z.innerHTML = '<h3>Plusieurs URDF trouvés — lequel ouvrir ?</h3>';
-  urdfs.forEach((u) => { const b = document.createElement('button'); b.textContent = u.chemin; b.onclick = () => charger(store, u); z.appendChild(b); });
+  z.innerHTML = `<h3>Plusieurs fichiers de description trouvés — lequel ouvrir ?</h3>${xacros.length ? '<div class="hint">Pour un xacro, choisissez le fichier <b>principal</b> (celui qui assemble le robot, souvent <code>*.urdf.xacro</code>) ; les fichiers « inclus » ne sont que des morceaux de modèle.</div>' : ''}`;
+  candidats.forEach((u) => { const b = document.createElement('button'); b.textContent = u.chemin + (estXacro(u) ? (u.principal ? '   (xacro · principal)' : '   (xacro · inclus)') : ''); b.onclick = () => ouvrirCandidat(store, u); z.appendChild(b); });
+}
+const estXacro = (e) => /\.xacro$/i.test(e.chemin);
+async function ouvrirCandidat(store, entree) {
+  if (!estXacro(entree)) { await charger(store, entree); return; }
+  try { await preparerXacro(store, entree); } catch (err) { setMsg(err.message || String(err), true); }
+}
+
+// ------------------------------------------------------------------ xacro : formulaire d'arguments puis conversion
+const cleXacro = (entree) => `dh3x:${entree.chemin}`;
+async function preparerXacro(store, entree) {
+  const texte = await store.texte(entree);
+  const args = argumentsXacro(texte);
+  let sauve = {};
+  try { sauve = JSON.parse(localStorage.getItem(cleXacro(entree)) || '{}'); } catch (e) { sauve = {}; }
+  $('choixurdf').style.display = 'none'; $('xacroForm').style.display = 'block';
+  $('xacroNom').textContent = entree.chemin; $('xacroNom').style.textTransform = 'none';
+  const g = $('xacroArgs'); g.innerHTML = '';
+  if (!args.length) g.innerHTML = '<span class="hint">Ce fichier ne déclare aucun argument.</span>';
+  args.forEach((a) => {
+    const l = document.createElement('label'); l.textContent = a.nom; l.htmlFor = 'xa_' + a.nom;
+    const i = document.createElement('input'); i.id = 'xa_' + a.nom; i.dataset.nom = a.nom; i.value = sauve[a.nom] !== undefined ? sauve[a.nom] : a.defaut;
+    g.append(l, i);
+  });
+  $('bXacro').onclick = () => convertirEtOuvrir(store, entree, texte);
+  setMsg('');
+}
+async function convertirEtOuvrir(store, entree, texte) {
+  const args = {};
+  document.querySelectorAll('#xacroArgs input').forEach((i) => { args[i.dataset.nom] = i.value; });
+  try { localStorage.setItem(cleXacro(entree), JSON.stringify(args)); } catch (e) { /* stockage indisponible */ }
+  try {
+    setMsg('Conversion du xacro…');
+    await store.lirePaquets();
+    const xml = await xacroVersUrdf({
+      texte, dossier: dossierDe(entree.chemin), args,
+      lire: (c) => store.texteChemin(c), paquet: (n) => store.dossierPaquet(n),
+    });
+    await charger(store, entree, null, xml);
+  } catch (err) {
+    console.error(err);
+    const brut = String(err.message || err).replace(/\s+/g, ' ');
+    setMsg(`Conversion impossible : ${brut.slice(0, 300)}. Astuce : si le xacro utilise des fonctions avancées, convertissez-le avec la commande xacro (pip install xacro) puis déposez l'URDF obtenu.`, true);
+  }
 }
 
 // ------------------------------------------------------------------ chargement d'un robot
-async function charger(store, entree, tip = null) {
+async function charger(store, entree, tip = null, xml = null) {
   try {
     setMsg('Lecture de l\'URDF…');
-    const texte = await store.texte(entree);
-    if (/xmlns:xacro|\$\{/.test(texte.slice(0, 5000)) || /<xacro:/.test(texte)) throw new Error('Ce fichier est un xacro : convertissez-le d\'abord en URDF (xacro robot.urdf.xacro > robot.urdf).');
+    const texte = xml !== null ? xml : await store.texte(entree);
+    if (xml === null && (/xmlns:xacro/.test(texte.slice(0, 5000)) || /<xacro:/.test(texte) || /\$\{/.test(texte))) { await preparerXacro(store, entree); return; }
     const doc = new DOMParser().parseFromString(texte, 'text/xml');
     if (doc.getElementsByTagName('parsererror').length) { const m = /error on line (\d+) at column (\d+): ([^\n]*?)(?:Below is|$)/i.exec(doc.getElementsByTagName('parsererror')[0].textContent || ''); throw new Error('Fichier XML invalide' + (m ? ` (ligne ${m[1]}, colonne ${m[2]} : ${m[3].trim()})` : '') + '.'); }
     const urdf = lireURDF(doc);
     const robot = new Robot(urdf, { tip });
     if (store !== E.store) E.cache = new Map();
-    Object.assign(E, { store, entree, urdf, robot });
+    Object.assign(E, { store, entree, urdf, robot, xml });
     $('chargement').style.display = 'flex';
     fermerDlg();
     const { geoms, manquants, erreurs } = await chargerMaillages(robot, store, dossierDe(entree.chemin));
@@ -242,7 +291,7 @@ function lier() {
   $('tpos').onchange = $('tang').onchange = planifier;
   $('bZero').onclick = () => { E.q = new Array(E.robot.n).fill(0); document.querySelectorAll('#sliders input').forEach((i) => { i.value = 0; $(`qv${i.dataset.k}`).textContent = '0°'; }); E.F = E.robot.F0.map((m) => m.slice()); viewer.appliquerPose(E.F); };
   $('bSol').onclick = () => { E.P = E.robot.parametresSolution(); construire(); };
-  $('tip').onchange = (e) => charger(E.store, E.entree, e.target.value);
+  $('tip').onchange = (e) => charger(E.store, E.entree, e.target.value, E.xml);
   document.querySelectorAll('[data-ex]').forEach((b) => {
     b.onclick = () => { const T = tableauExportable(); if (!T) return; const f = b.dataset.ex; telecharger(nomFichier(f), formaterTableau(T, f, E.robot.nom), f === 'json' ? 'application/json' : 'text/plain'); };
   });

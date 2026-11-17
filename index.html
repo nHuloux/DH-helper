@@ -85,8 +85,14 @@
       <input type="file" id="inFichiers" multiple hidden accept=".urdf,.zip,.stl,.obj,.dae,.glb,.gltf,.xacro">
     </div>
     <div id="choixurdf" style="display:none"></div>
+    <div id="xacroForm" style="display:none">
+      <h3>Fichier xacro : <span id="xacroNom"></span></h3>
+      <div class="hint">Un xacro est un modèle paramétrable : renseignez ses arguments (par exemple le modèle de bras et le nombre d'axes), puis lancez la conversion. Ouverture expérimentale : si elle échoue, convertissez le fichier en URDF avec <code>xacro</code>.</div>
+      <div id="xacroArgs" class="argsgrid"></div>
+      <div class="bar" style="margin-top:6px"><button id="bXacro" class="principal">Convertir et ouvrir</button></div>
+    </div>
     <div class="msgdlg" id="msgdlg"></div>
-    <p class="hint" style="margin-bottom:0">Chaînes sérielles à articulations rotoïdes. Les URDF issus de xacro doivent d'abord être convertis (<code>xacro robot.urdf.xacro &gt; robot.urdf</code>). Les maillages sont retrouvés même avec des chemins <code>package://…</code> tant qu'ils sont dans le dossier ou le zip déposé.</p>
+    <p class="hint" style="margin-bottom:0">Chaînes sérielles à articulations rotoïdes. Les fichiers <code>.xacro</code> sont convertis dans le navigateur (expérimental). Les maillages sont retrouvés même avec des chemins <code>package://…</code> tant qu'ils sont dans le dossier ou le zip déposé.</p>
     <div class="bar" style="justify-content:flex-end;margin-top:8px"><button id="bFermer" style="display:none">Fermer</button></div>
   </div>
 </div>

@@ -27,6 +27,27 @@ export class FileStore {
   urdfs() { return this.parExtension('urdf'); }
   xacros() { return this.fichiers.size ? [...this.fichiers.values()].filter((f) => /\.(xacro|urdf\.xacro)$/i.test(f.chemin)) : []; }
   async texte(entree) { return new TextDecoder('utf-8').decode(await entree.lire()); }
+  async texteChemin(chemin) {
+    const f = this.fichiers.get(normaliser(chemin)) || this.trouver(chemin, '');
+    if (!f) throw new Error(`fichier introuvable : ${chemin}`);
+    return this.texte(f);
+  }
+  // Noms de paquets ROS (fichiers package.xml) → dossier ; à appeler avant toute résolution de $(find …).
+  async lirePaquets() {
+    this.paquets = new Map();
+    for (const f of this.fichiers.values()) {
+      if (f.nom !== 'package.xml') continue;
+      try { const m = /<name>\s*([^<\s]+)\s*<\/name>/.exec(await this.texte(f)); if (m) this.paquets.set(m[1], dossierDe(f.chemin)); } catch (e) { /* ignoré */ }
+    }
+  }
+  dossierPaquet(nom) {
+    if (this.paquets && this.paquets.has(nom)) return this.paquets.get(nom);
+    for (const c of this.fichiers.keys()) {            // à défaut : un dossier portant le nom du paquet
+      const seg = c.split('/'); const i = seg.indexOf(nom);
+      if (i >= 0 && i < seg.length - 1) return seg.slice(0, i + 1).join('/');
+    }
+    throw new Error(`paquet ROS « ${nom} » introuvable dans les fichiers déposés (déposez aussi le dossier de ce paquet)`);
+  }
 
   // Retrouve un fichier à partir du nom indiqué dans l'URDF : relatif, package://, file://, ou simple suffixe de chemin.
   trouver(nomFichier, dossierUrdf = '') {

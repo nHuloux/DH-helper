@@ -290,7 +290,7 @@ class Robot:
         self.chemin = os.path.abspath(urdf)
         self.dossier = os.path.dirname(self.chemin)
         brut = open(self.chemin, encoding="utf-8", errors="ignore").read()
-        if "xacro" in brut[:2000] or "${" in brut:
+        if "xmlns:xacro" in brut or "<xacro:" in brut or "${" in brut:
             raise ValueError("Fichier xacro : convertissez-le d'abord en URDF (xacro robot.urdf.xacro > robot.urdf).")
         root = ET.fromstring(brut.encode("utf-8")) if not brut.lstrip().startswith("<?xml") else ET.parse(self.chemin).getroot()
         self.nom = root.get("name", os.path.basename(urdf))
@@ -747,8 +747,13 @@ class Robot:
         lo = np.array([max(a, -180) for a, b in self.limites])
         hi = np.array([min(b, 180) for a, b in self.limites])
 
+        # repère 0 imposé (pas toujours confondu avec la base : z0 est l'axe de l'articulation 1, parfois orienté vers le bas)
+        B = np.eye(4)
+        B[:3, 0], B[:3, 2], B[:3, 3] = self.REP0["x"], self.REP0["z"], self.REP0["O"]
+        B[:3, 1] = np.cross(self.REP0["z"], self.REP0["x"])
+
         def dh_fk(q):
-            M, out = np.eye(4), []
+            M, out = B.copy(), []
             for k in range(self.n):
                 M = M @ dh_matrice(T[k, 0] + q[k], T[k, 1], T[k, 2], T[k, 3])
                 out.append(M.copy())
