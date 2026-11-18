@@ -59,3 +59,6 @@ details summary { cursor: pointer; color: #444; margin: 4px 0; }
   body { overflow: auto; } main { flex-direction: column; }
   #vue { flex: none; height: 56vh; } #panel { width: 100%; border-left: 0; border-top: 1px solid var(--bd); overflow: visible; }
 }
+
+#tab td.var{background:#fff4c2;font-weight:600}
+.var{background:#fff4c2}

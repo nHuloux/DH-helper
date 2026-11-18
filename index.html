@@ -52,6 +52,7 @@
 
     <h2>Tableau DH</h2>
     <table id="tab"><thead><tr><th>i</th><th>θ₀ (°)</th><th>d (mm)</th><th>r (mm)</th><th>α (°)</th></tr></thead><tbody></tbody></table>
+    <div class="hint" id="legVar" style="display:none"><span class="var" style="padding:0 6px">cellule colorée</span> = variable articulaire : θ = θ₀ + q (rotoïde) ou d = d₀ + q (prismatique). Les valeurs affichées sont celles à q = 0.</div>
     <div class="bar" style="margin-top:6px"><button data-ex="csv">CSV</button><button data-ex="json">JSON</button><button data-ex="tex">LaTeX</button><button id="cp">Copier</button></div>
 
     <div id="secAide"><h2>Aide</h2>
@@ -92,7 +93,7 @@
       <div class="bar" style="margin-top:6px"><button id="bXacro" class="principal">Convertir et ouvrir</button></div>
     </div>
     <div class="msgdlg" id="msgdlg"></div>
-    <p class="hint" style="margin-bottom:0">Chaînes sérielles à articulations rotoïdes. Les fichiers <code>.xacro</code> sont convertis dans le navigateur (expérimental). Les maillages sont retrouvés même avec des chemins <code>package://…</code> tant qu'ils sont dans le dossier ou le zip déposé.</p>
+    <p class="hint" style="margin-bottom:0">Chaînes sérielles à articulations rotoïdes et prismatiques. Les fichiers <code>.xacro</code> sont convertis dans le navigateur (expérimental). Les maillages sont retrouvés même avec des chemins <code>package://…</code> tant qu'ils sont dans le dossier ou le zip déposé.</p>
     <div class="bar" style="justify-content:flex-end;margin-top:8px"><button id="bFermer" style="display:none">Fermer</button></div>
   </div>
 </div>

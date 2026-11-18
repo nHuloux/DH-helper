@@ -161,9 +161,9 @@ function initialiserInterface() {
   const bons = R.infoBranches.branches.filter((b) => b.valide);
   $('branche').style.display = bons.length > 1 ? 'flex' : 'none';
   const sel = $('tip'); sel.innerHTML = '';
-  bons.forEach((b) => { const o = document.createElement('option'); o.value = b.tip; o.textContent = `${b.tip} (${b.nRot} rotoïdes)`; o.selected = b.tip === R.tip; sel.appendChild(o); });
+  bons.forEach((b) => { const o = document.createElement('option'); o.value = b.tip; o.textContent = `${b.tip} (${b.nRot} rotoïde${b.nRot > 1 ? 's' : ''}${b.nPris ? ` + ${b.nPris} prismatique${b.nPris > 1 ? 's' : ''}` : ''})`; o.selected = b.tip === R.tip; sel.appendChild(o); });
   const r0 = R.REP0;
-  $('rep0').innerHTML = `Repère 0 imposé : O₀ = (${r0.O.map(f2).join(', ')}) mm · x₀ = (${r0.x.map(f2).join(', ')}) · z₀ = axe de l'articulation 1 · ${R.n} articulations`;
+  $('rep0').innerHTML = `Repère 0 imposé : O₀ = (${r0.O.map(f2).join(', ')}) mm · x₀ = (${r0.x.map(f2).join(', ')}) · z₀ = axe de l'articulation 1 · ${R.n} articulations${R.types.includes('P') ? ` (${R.types.join('')} : R = rotoïde, P = prismatique)` : ''}`;
   const fb = $('fbar'); fb.innerHTML = '';
   for (let i = 1; i <= R.n; i++) { const b = document.createElement('button'); b.className = 'f' + (i === 1 ? ' cur' : ''); b.textContent = i; b.dataset.i = i; b.onclick = () => choisir(i); fb.appendChild(b); }
   const ab = $('abar'); ab.innerHTML = ''; $('aide').style.display = 'none';
@@ -173,11 +173,13 @@ function initialiserInterface() {
   const sl = $('sliders'); sl.innerHTML = '';
   R.limites.forEach(([lo, hi], k) => {
     const d = document.createElement('div'); d.className = 'row';
-    d.innerHTML = `<label>q${k + 1}</label><input type="range" min="${Math.max(lo, -180)}" max="${Math.min(hi, 180)}" step="1" value="0" data-k="${k}" aria-label="Articulation ${k + 1}"><span style="width:44px;text-align:right" id="qv${k}">0°</span>`;
+    const P = R.types[k] === 'P', un = P ? ' mm' : '°';
+    const mn = Math.round(P ? lo : Math.max(lo, -180)), mx = Math.round(P ? hi : Math.min(hi, 180));
+    d.innerHTML = `<label>${P ? 'd' : 'q'}${k + 1}</label><input type="range" min="${mn}" max="${mx}" step="1" value="${Math.min(Math.max(0, mn), mx)}" data-k="${k}" data-un="${un}" aria-label="Articulation ${k + 1} (${P ? 'prismatique, mm' : 'rotoïde, degrés'})"><span style="width:58px;text-align:right" id="qv${k}">${Math.min(Math.max(0, mn), mx)}${un}</span>`;
     sl.appendChild(d);
   });
   sl.querySelectorAll('input').forEach((inp) => {
-    inp.oninput = () => { const k = +inp.dataset.k; E.q[k] = +inp.value; $(`qv${k}`).textContent = `${E.q[k]}°`; E.F = R.fk(E.q); viewer.appliquerPose(E.F); };
+    inp.oninput = () => { const k = +inp.dataset.k; E.q[k] = +inp.value; $(`qv${k}`).textContent = `${E.q[k]}${inp.dataset.un}`; E.F = R.fk(E.q); viewer.appliquerPose(E.F); };
   });
   $('rapport').style.display = 'none'; $('tabEtu').value = '';
   $('prof').style.display = PROF ? 'block' : 'none';
@@ -246,7 +248,9 @@ function rendreResultats() {
   d.etats.forEach((e) => {
     const sym = { ok: '✔', warn: '⚠', err: '✘', todo: '…' }[e.statut];
     let h = `<b>${sym} Repère ${e.i}</b>`;
-    if (e.params && (e.statut === 'ok' || e.statut === 'warn')) h += ` → θ₀=${f2(e.params[0])}° d=${f2(e.params[1])} r=${f2(e.params[2])} α=${f2(e.params[3])}°`;
+    if (e.params && (e.statut === 'ok' || e.statut === 'warn')) h += R.types[e.i - 1] === 'P'
+      ? ` → θ=${f2(e.params[0])}° d₀=${f2(e.params[1])} (variable : d = d₀ + q) r=${f2(e.params[2])} α=${f2(e.params[3])}°`
+      : ` → θ₀=${f2(e.params[0])}° d=${f2(e.params[1])} r=${f2(e.params[2])} α=${f2(e.params[3])}°`;
     const div = document.createElement('div'); div.className = e.statut;
     div.innerHTML = h + e.msgs.map((m) => `<div style="margin-left:14px;font-weight:normal">${echapper(m)}</div>`).join('');
     lg.appendChild(div);
@@ -255,8 +259,10 @@ function rendreResultats() {
   const tb = document.querySelector('#tab tbody'); tb.innerHTML = '';
   for (let i = 0; i < R.n; i++) {
     const p = d.etats[i].params, ok = d.etats[i].statut === 'ok' || d.etats[i].statut === 'warn';
-    tb.innerHTML += `<tr><td>${i + 1}</td>${p && ok ? p.map((v) => `<td>${f2(v)}</td>`).join('') : '<td colspan="4" style="text-align:center;color:#aaa">—</td>'}</tr>`;
+    const iv = R.types[i] === 'P' ? 1 : 0;   // colonne de la variable articulaire : θ (0) ou d (1)
+    tb.innerHTML += `<tr><td>${i + 1}</td>${p && ok ? p.map((v, c) => `<td${c === iv ? ' class="var"' : ''}>${f2(v)}</td>`).join('') : '<td colspan="4" style="text-align:center;color:#aaa">—</td>'}</tr>`;
   }
+  $('legVar').style.display = R.types.includes('P') ? 'block' : 'none';
   d.etats.forEach((e) => {
     const b = document.querySelector(`#fbar button[data-i="${e.i}"]`);
     if (b) b.className = 'f ' + (e.statut === 'todo' ? '' : e.statut) + (e.i === E.cur ? ' cur' : '');
@@ -293,17 +299,18 @@ function lier() {
   $('bSol').onclick = () => { E.P = E.robot.parametresSolution(); construire(); };
   $('tip').onchange = (e) => charger(E.store, E.entree, e.target.value, E.xml);
   document.querySelectorAll('[data-ex]').forEach((b) => {
-    b.onclick = () => { const T = tableauExportable(); if (!T) return; const f = b.dataset.ex; telecharger(nomFichier(f), formaterTableau(T, f, E.robot.nom), f === 'json' ? 'application/json' : 'text/plain'); };
+    b.onclick = () => { const T = tableauExportable(); if (!T) return; const f = b.dataset.ex; telecharger(nomFichier(f), formaterTableau(T, f, E.robot.nom, E.robot.types), f === 'json' ? 'application/json' : 'text/plain'); };
   });
   $('cp').onclick = async () => {
     const T = tableauExportable(); if (!T) return;
-    const txt = 'i\tθ0 (°)\td (mm)\tr (mm)\tα (°)\n' + T.map((l, i) => `${i + 1}\t${l.map((v) => f2(v)).join('\t')}`).join('\n');
+    const av = E.robot.types.includes('P');
+    const txt = 'i\tθ0 (°)\td (mm)\tr (mm)\tα (°)' + (av ? '\tvariable' : '') + '\n' + T.map((l, i) => `${i + 1}\t${l.map((v) => f2(v)).join('\t')}${av ? '\t' + (E.robot.types[i] === 'P' ? 'd' : 'θ') : ''}`).join('\n');
     try { await navigator.clipboard.writeText(txt); $('cp').textContent = 'Copié ✔'; } catch (e) { window.prompt('Copiez le tableau :', txt); }
     setTimeout(() => { $('cp').textContent = 'Copier'; }, 1500);
   };
   $('bVerif').onclick = () => {
     const lignes = $('tabEtu').value.split(/\n+/).map((l) => l.trim()).filter(Boolean);
-    const T = lignes.map((l) => l.replace(/(\d),(\d)/g, '$1.$2').split(/[\s;\t]+/).map(Number));
+    const T = lignes.map((l) => l.replace(/(\d),(\d)/g, '$1.$2').split(/[\s;\t]+/).filter((t) => !/^(d|θ|theta|q|r|p)$/i.test(t)).map(Number));
     const r = $('rapport'); r.style.display = 'block';
     const n = E.robot.n;
     const T4 = T.map((l) => (l.length === 5 ? l.slice(1) : l));

@@ -20,9 +20,9 @@ Le fichier `.nojekyll` (à conserver) évite que GitHub Pages ne retraite les fi
 
 ## Utilisation
 
-- **Robots d'exemple** : xArm 6 (robot du cours), xArm 7, Lite 6, UR5 simplifié, Stäubli TX60 et TX90, Kinova Gen3 6 axes.
+- **Robots d'exemple** : xArm 6 (robot du cours), xArm 7, Lite 6, UR5 simplifié, Stäubli TX60 et TX90, Kinova Gen3 6 axes, et un **SCARA générique RRPR** (exemple pédagogique avec une articulation prismatique).
 - **Votre robot** : glisser-déposer le dossier du robot (fichier `.urdf` + maillages `.stl`, `.dae`, `.obj`, `.glb`) ou une archive `.zip` ; ou boutons « Choisir un dossier / un .zip ». Les chemins de maillages `package://…`, `file://…` ou relatifs sont retrouvés par leur fin de chemin.
-- Chaîne **sérielle à articulations rotoïdes**. Si l'URDF est ramifié, un menu permet de choisir la chaîne (lien terminal). Les articulations prismatiques situées après la dernière rotoïde sont ignorées ; une prismatique au milieu de la chaîne est refusée. Les fichiers **xacro** sont convertis **dans le navigateur** (fonction expérimentale, bibliothèque xacro-parser) : déposer le paquet complet (ex. `kortex_description/`, avec son `package.xml`), choisir le fichier xacro *principal* (souvent `*.urdf.xacro`, celui qui déclare des arguments), renseigner ses arguments (ex. pour Kinova : `arm=gen3`, `dof=6`, `vision=false`) puis « Convertir et ouvrir ». Les références `$(find paquet)` sont résolues dans les fichiers déposés ; les blocs `ros2_control`, `gazebo` et `transmission` sont ignorés (inutiles pour la cinématique). Les fonctions xacro avancées (`load_yaml`, Python embarqué…) ne sont pas toutes gérées ; en cas d'échec, convertir hors ligne (`pip install xacro`, puis `xacro robot.urdf.xacro arg:=valeur > robot.urdf`) et déposer l'URDF obtenu.
+- Chaîne **sérielle à articulations rotoïdes et prismatiques** (`revolute`, `continuous`, `prismatic`). Pour une prismatique, la variable articulaire est d = d₀ + q (θ reste constant) ; son curseur est en **mm** et la cellule correspondante du tableau DH est colorée (les valeurs affichées sont celles à q = 0). Si l'URDF est ramifié, un menu permet de choisir la chaîne (lien terminal). Une prismatique en bout de chaîne n'est conservée que si elle est seule à partir de son lien parent et sans `mimic` : les doigts d'une pince sont donc ignorés par défaut. Les exports CSV/JSON/LaTeX ajoutent une colonne « variable » dès qu'il y a une prismatique. Les fichiers **xacro** sont convertis **dans le navigateur** (fonction expérimentale, bibliothèque xacro-parser) : déposer le paquet complet (ex. `kortex_description/`, avec son `package.xml`), choisir le fichier xacro *principal* (souvent `*.urdf.xacro`, celui qui déclare des arguments), renseigner ses arguments (ex. pour Kinova : `arm=gen3`, `dof=6`, `vision=false`) puis « Convertir et ouvrir ». Les références `$(find paquet)` sont résolues dans les fichiers déposés ; les blocs `ros2_control`, `gazebo` et `transmission` sont ignorés (inutiles pour la cinématique). Les fonctions xacro avancées (`load_yaml`, Python embarqué…) ne sont pas toutes gérées ; en cas d'échec, convertir hors ligne (`pip install xacro`, puis `xacro robot.urdf.xacro arg:=valeur > robot.urdf`) et déposer l'URDF obtenu.
 - Pour chaque repère i : l'origine O_i glisse le long de l'axe z_i (imposée si z_{i-1} et z_i sont sécants) ; la direction de x_i est imposée (au sens près) sauf cas libre où un curseur d'angle apparaît. L'outil signale la règle violée (x ⟂ z_{i-1}, x coupe z_{i-1}, normale commune, origine sur l'axe…).
 - Section **Vérifier un tableau DH** : coller les lignes `θ₀ d r α` d'un étudiant ; le test compare, pour des configurations aléatoires, ses repères à ceux de l'URDF et indique la première ligne suspecte.
 
@@ -30,7 +30,7 @@ Le fichier `.nojekyll` (à conserver) évite que GitHub Pages ne retraite les fi
 
 | Paramètre | Effet |
 |---|---|
-| `?robot=xarm6` | ouvre directement un exemple (`xarm6`, `xarm7`, `lite6`, `ur5`, `tx60`, `tx90`, `kinova_gen3_6dof`) |
+| `?robot=xarm6` | ouvre directement un exemple (`xarm6`, `xarm7`, `lite6`, `ur5`, `tx60`, `tx90`, `kinova_gen3_6dof`, `scara`) |
 | `?aide=0..3` | niveau d'aide maximal (0 = aucune aide ; 2 = sans la réponse ; 3 = tout, par défaut) |
 | `?prof=1` | affiche le bouton « Charger la solution de référence » |
 
@@ -54,15 +54,15 @@ js/viewer.js          scène three.js (Z vers le haut, mm)
 js/app.js             interface
 robots/               exemples (+ index.json)
 vendor/               three.js (MIT), JSZip (MIT/GPLv3), xacro-parser + expr-eval (MIT)
-outils_python/        version locale Python équivalente (dh_studio.py v3, mêmes règles)
+outils_python/        version locale Python équivalente (dh_studio.py v4, mêmes règles, prismatiques comprises)
 .github/workflows/    déploiement GitHub Pages
 ```
 
-`js/robot.js` est un portage fidèle du moteur Python `dh_studio.py` ; les deux ont été comparés sur xArm 6, xArm 7, Lite 6 et UR5 (tableau de référence, analyse de repères corrects et erronés, construction par curseurs, validation de tableaux, exports) avec des écarts inférieurs à 10⁻⁶.
+`js/robot.js` est un portage fidèle du moteur Python `dh_studio.py` ; les deux ont été comparés sur xArm 6, xArm 7, Lite 6, UR5 et SCARA RRPR (tableau de référence, analyse de repères corrects et erronés, construction par curseurs, validation de tableaux, exports) avec des écarts inférieurs à 10⁻⁶.
 
 ## Limites
 
-- Convention DH **standard** uniquement (pas de DH modifiée) ; rotoïdes uniquement.
+- Convention DH **standard** uniquement (pas de DH modifiée) ; rotoïdes et prismatiques (pas de joints `planar`, `floating`, ni de boucles fermées).
 - Les repères sont calculés à partir des axes de l'URDF : un URDF dont les angles sont arrondis (ex. `1.5708`) est toléré (axes parallèles à 0,1° près, sécants à 0,1 mm près).
 - Navigateurs récents (Chrome, Edge, Firefox, Safari) avec WebGL. Le dépôt d'un **dossier** par glisser-déposer fonctionne sur les principaux navigateurs de bureau ; à défaut, utiliser « Choisir un dossier » ou un `.zip`.
 
@@ -72,4 +72,4 @@ outils_python/        version locale Python équivalente (dh_studio.py v3, même
 - three.js © les auteurs de three.js, licence MIT (`vendor/three/LICENSE`) ; JSZip, licence MIT (`vendor/jszip/LICENSE.markdown`).
 - xacro-parser © Garrett Johnson et expr-eval © Matthew Crumley, licence MIT (`vendor/xacro/LICENSE-xacro-parser.txt`).
 - Kinova Gen3 6 axes : Kinova `ros2_kortex` (`kortex_description`), licence BSD (`robots/LICENSE-ros2_kortex.txt`), converti de xacro (`arm=gen3 dof=6 vision=false`), maillages décimés.
-- Maillages et cinématique des xArm 6 / xArm 7 / Lite 6 : UFACTORY xarm_ros, licence BSD (`robots/LICENSE-xarm_ros.txt`), maillages décimés. Stäubli TX60 / TX90 : ROS-Industrial `staubli_experimental`, licence Apache 2.0 (`robots/LICENSE-staubli_experimental.txt`), converti de xacro en URDF (maillages visuels seulement). UR5 : modèle simplifié écrit pour l'outil.
+- Maillages et cinématique des xArm 6 / xArm 7 / Lite 6 : UFACTORY xarm_ros, licence BSD (`robots/LICENSE-xarm_ros.txt`), maillages décimés. Stäubli TX60 / TX90 : ROS-Industrial `staubli_experimental`, licence Apache 2.0 (`robots/LICENSE-staubli_experimental.txt`), converti de xacro en URDF (maillages visuels seulement). UR5 et SCARA RRPR : modèles simplifiés écrits pour l'outil (primitives, sans maillage).

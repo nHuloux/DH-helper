@@ -12,7 +12,7 @@ Outil autonome (Python + numpy, aucune autre dépendance obligatoire) qui, pour 
   * exporte le tableau (CSV, JSON, LaTeX) et une image du robot avec repères.
 
 Convention : A_i = Rot(z,theta_i) Trans(z,d_i) Trans(x,r_i) Rot(x,alpha_i),  theta_i = theta0_i + q_i.
-Unités : mm et degrés.  Limites v1 : chaîne série, articulations rotoïdes (revolute / continuous).
+Unités : mm et degrés.  Chaîne série : articulations rotoïdes (revolute / continuous) et prismatiques (prismatic).
 
 Utilisation
 -----------
@@ -303,7 +303,8 @@ class Robot:
                 name=j.get("name"), type=j.get("type"), parent=j.find("parent").get("link"), child=j.find("child").get("link"),
                 T=_origine(j), axe=_vec(ax.get("xyz") if ax is not None else None, [1, 0, 0]),
                 lo=float(lim.get("lower")) if (lim is not None and lim.get("lower") is not None) else None,
-                hi=float(lim.get("upper")) if (lim is not None and lim.get("upper") is not None) else None))
+                hi=float(lim.get("upper")) if (lim is not None and lim.get("upper") is not None) else None,
+                mimic=j.find("mimic") is not None))
         enfants = {}
         for j in joints:
             enfants.setdefault(j["parent"], []).append(j)
@@ -325,25 +326,57 @@ class Robot:
                 dfs(j["child"], acc)
                 acc.pop()
         dfs(base, [])
-        mobiles = lambda ch: sum(1 for j in ch if j["type"] in ("revolute", "continuous", "prismatic"))
+        ROT = ("revolute", "continuous")
+
+        def utile(ch):
+            """Chaîne tronquée après la dernière rotoïde (+ fixes qui suivent). Une prismatique terminale est conservée
+            si elle est seule à partir de son lien parent et ne copie pas une autre articulation (mimic)."""
+            der = -1
+            for k, j in enumerate(ch):
+                if j["type"] in ROT:
+                    der = k
+            k = der + 1
+            while k < len(ch) and (ch[k]["type"] == "fixed" or (ch[k]["type"] == "prismatic" and not ch[k]["mimic"]
+                                                                and len(enfants.get(ch[k]["parent"], [])) == 1)):
+                if ch[k]["type"] == "prismatic":
+                    der = k
+                k += 1
+            if der < 0:
+                return list(ch)
+            fin = der
+            while fin + 1 < len(ch) and ch[fin + 1]["type"] == "fixed":
+                fin += 1
+            return ch[:fin + 1]
+
+        utiles, vus = [], set()
+        for c in chemins:
+            u = utile(c)
+            cle = tuple(j["name"] for j in u)
+            if cle not in vus:
+                vus.add(cle)
+                utiles.append(u)
+        nrot = lambda ch: sum(1 for j in ch if j["type"] in ROT)
+        npris = lambda ch: sum(1 for j in ch if j["type"] == "prismatic")
         if tip is not None:
-            cand = [c for c in chemins if c and c[-1]["child"] == tip]
+            cand = [c for c in utiles if c and c[-1]["child"] == tip] or [c for c in chemins if c and c[-1]["child"] == tip]
             if not cand:
                 raise ValueError(f"Lien terminal « {tip} » introuvable.")
             chaine = cand[0]
         else:
-            chaine = max(chemins, key=mobiles)
+            # le plus d'articulations rotoïdes, puis le moins de prismatiques (le bras plutôt que les doigts de pince)
+            chaine = utiles[0]
+            for c in utiles[1:]:
+                if (nrot(c), -npris(c)) > (nrot(chaine), -npris(chaine)):
+                    chaine = c
             if len(chemins) > 1 and verbose:
                 print(f"Attention : l'URDF est ramifié ({len(chemins)} branches) ; branche retenue : jusqu'à « {chaine[-1]['child']} ». "
                       f"Utilisez --tip pour en choisir une autre.", file=sys.stderr)
         for j in chaine:
-            if j["type"] == "prismatic":
-                raise ValueError(f"Articulation prismatique « {j['name']} » : non gérée dans cette version (rotoïdes uniquement).")
-            if j["type"] not in ("revolute", "continuous", "fixed"):
+            if j["type"] not in ("revolute", "continuous", "prismatic", "fixed"):
                 raise ValueError(f"Type d'articulation non géré : {j['type']} ({j['name']}).")
         self.base, self.tip = base, chaine[-1]["child"] if chaine else base
         # repères de la chaîne
-        self.ORIG, self.AXL, self.noms, self.limites = [], [], [], []
+        self.ORIG, self.AXL, self.noms, self.limites, self.types = [], [], [], [], []
         attach = [(base, 0, np.eye(4))]
         Tacc = np.eye(4)
         m = 0
@@ -357,7 +390,10 @@ class Robot:
                 self.ORIG.append(Tacc @ To)
                 self.AXL.append(_u(j["axe"]))
                 self.noms.append(j["name"])
-                if j["type"] == "continuous" or j["lo"] is None or j["hi"] is None:
+                self.types.append("P" if j["type"] == "prismatic" else "R")
+                if j["type"] == "prismatic":   # millimètres
+                    self.limites.append((-100.0, 100.0) if j["lo"] is None or j["hi"] is None else (j["lo"] * 1000.0, j["hi"] * 1000.0))
+                elif j["type"] == "continuous" or j["lo"] is None or j["hi"] is None:   # degrés
                     self.limites.append((-180.0, 180.0))
                 else:
                     self.limites.append((math.degrees(j["lo"]), math.degrees(j["hi"])))
@@ -392,11 +428,17 @@ class Robot:
         self.taille = self._taille()
 
     # ----------------------------------------------------------- cinématique
-    def fk(self, q_deg):
-        q = np.radians(np.asarray(q_deg, float))
+    def fk(self, q):
+        """q : degrés pour une rotoïde, millimètres pour une prismatique."""
+        q = np.asarray(q, float)
         F = [np.eye(4)]
         for k in range(self.n):
-            F.append(F[-1] @ self.ORIG[k] @ _T(rot_axe(self.AXL[k], q[k])))
+            if self.types[k] == "P":
+                mouv = np.eye(4)
+                mouv[:3, 3] = self.AXL[k] * q[k]
+            else:
+                mouv = _T(rot_axe(self.AXL[k], math.radians(q[k])))
+            F.append(F[-1] @ self.ORIG[k] @ mouv)
         return F
 
     def _taille(self):
@@ -735,6 +777,8 @@ class Robot:
         if niveau >= 3:
             p = self.parametres(R[i - 1], R[i])
             out.append(f"Niveau 3 — O_{i} = {np.round(R[i]['O'], 1).tolist()} mm ; x_{i} = {np.round(R[i]['x'], 3).tolist()} → θ0={p[0]:+.2f}° d={p[1]:.2f} r={p[2]:.2f} α={p[3]:+.2f}°")
+            if self.types[i - 1] == "P":
+                out.append(f"Articulation {i} prismatique : la variable est d_{i} = d0_{i} + q_{i} (θ_{i} reste constant) ; d0 est la valeur lorsque q_{i} = 0.")
         return "\n".join(out)
 
     # ---------------------------------------------------- validation d'un tableau DH
@@ -744,8 +788,8 @@ class Robot:
         if T.shape != (self.n, 4):
             return False, [f"Le tableau doit avoir {self.n} lignes de 4 valeurs (θ0, d, r, α)."]
         rng = np.random.default_rng(graine)
-        lo = np.array([max(a, -180) for a, b in self.limites])
-        hi = np.array([min(b, 180) for a, b in self.limites])
+        lo = np.array([a if self.types[k] == "P" else max(a, -180) for k, (a, b) in enumerate(self.limites)])
+        hi = np.array([b if self.types[k] == "P" else min(b, 180) for k, (a, b) in enumerate(self.limites)])
 
         # repère 0 imposé (pas toujours confondu avec la base : z0 est l'axe de l'articulation 1, parfois orienté vers le bas)
         B = np.eye(4)
@@ -755,7 +799,8 @@ class Robot:
         def dh_fk(q):
             M, out = B.copy(), []
             for k in range(self.n):
-                M = M @ dh_matrice(T[k, 0] + q[k], T[k, 1], T[k, 2], T[k, 3])
+                P = self.types[k] == "P"
+                M = M @ dh_matrice(T[k, 0] + (0 if P else q[k]), T[k, 1] + (q[k] if P else 0), T[k, 2], T[k, 3])
                 out.append(M.copy())
             return out
         T0, F0 = dh_fk(np.zeros(self.n)), self.F0
@@ -789,7 +834,8 @@ class Robot:
     def en_json(self, tableau, nom_robot=None):
         T = np.asarray(tableau, float)
         return json.dumps(dict(robot=nom_robot or self.nom, convention="DH standard", unites=dict(longueur="mm", angle="deg"),
-                               lignes=[dict(i=i + 1, theta0=round(_nettoyer(T[i, 0]), 3) + 0.0, d=round(_nettoyer(T[i, 1]), 3) + 0.0, r=round(_nettoyer(T[i, 2]), 3) + 0.0, alpha=round(_nettoyer(T[i, 3]), 3) + 0.0)
+                               lignes=[dict(i=i + 1, theta0=round(_nettoyer(T[i, 0]), 3) + 0.0, d=round(_nettoyer(T[i, 1]), 3) + 0.0, r=round(_nettoyer(T[i, 2]), 3) + 0.0, alpha=round(_nettoyer(T[i, 3]), 3) + 0.0,
+                                            **({"variable": "d" if self.types[i] == "P" else "theta"} if "P" in self.types else {}))
                                        for i in range(len(T))]), ensure_ascii=False, indent=2)
 
 
@@ -804,18 +850,23 @@ def _fmt(v, nd=3):
     return "0" if s in ("-0", "") else s
 
 
-def formater_tableau(tableau, fmt="text", nom_robot="robot", robot=None):
+def formater_tableau(tableau, fmt="text", nom_robot="robot", robot=None, types=None):
     T = np.asarray(tableau, float)
+    types = types if types is not None else (robot.types if robot is not None else None)
+    P = lambda k: bool(types) and types[k] == "P"
+    av = bool(types) and "P" in types   # colonne « variable » seulement s'il y a une prismatique
     if fmt == "csv":
-        return "i,theta0_deg,d_mm,r_mm,alpha_deg\n" + "\n".join(f"{i + 1},{_fmt(T[i, 0])},{_fmt(T[i, 1])},{_fmt(T[i, 2])},{_fmt(T[i, 3])}" for i in range(len(T)))
+        return "i,theta0_deg,d_mm,r_mm,alpha_deg" + (",variable" if av else "") + "\n" + "\n".join(
+            f"{i + 1},{_fmt(T[i, 0])},{_fmt(T[i, 1])},{_fmt(T[i, 2])},{_fmt(T[i, 3])}" + (("," + ("d" if P(i) else "theta")) if av else "") for i in range(len(T)))
     if fmt == "json":
         return (robot.en_json(T, nom_robot) if robot else json.dumps(T.tolist()))
     if fmt == "tex":
-        lg = "\n".join(f"{i + 1} & {_fmt(T[i, 0], 2)} & {_fmt(T[i, 1], 2)} & {_fmt(T[i, 2], 2)} & {_fmt(T[i, 3], 2)} \\\\" for i in range(len(T)))
-        return ("\\begin{tabular}{c|cccc}\n$i$ & $\\theta_{0,i}$ (°) & $d_i$ (mm) & $r_i$ (mm) & $\\alpha_i$ (°) \\\\ \\hline\n" + lg + "\n\\end{tabular}")
-    out = [f"Tableau DH standard — {nom_robot}", " i |  theta0 (°) |    d (mm) |    r (mm) |  alpha (°)", "---+-------------+-----------+-----------+-----------"]
+        lg = "\n".join(f"{i + 1} & {_fmt(T[i, 0], 2)} & {_fmt(T[i, 1], 2)} & {_fmt(T[i, 2], 2)} & {_fmt(T[i, 3], 2)}" + ((" & " + ("$d$" if P(i) else "$\\theta$")) if av else "") + " \\\\" for i in range(len(T)))
+        return ("\\begin{tabular}{c|cccc" + ("c" if av else "") + "}\n$i$ & $\\theta_{0,i}$ (°) & $d_i$ (mm) & $r_i$ (mm) & $\\alpha_i$ (°)" + (" & variable" if av else "") + " \\\\ \\hline\n" + lg + "\n\\end{tabular}")
+    out = [f"Tableau DH standard — {nom_robot}", " i |  theta0 (°) |    d (mm) |    r (mm) |  alpha (°)" + (" | variable" if av else ""),
+           "---+-------------+-----------+-----------+-----------" + ("+---------" if av else "")]
     for i in range(len(T)):
-        out.append(f"{i + 1:2d} | {T[i, 0]:11.3f} | {T[i, 1]:9.3f} | {T[i, 2]:9.3f} | {T[i, 3]:10.3f}")
+        out.append(f"{i + 1:2d} | {T[i, 0]:11.3f} | {T[i, 1]:9.3f} | {T[i, 2]:9.3f} | {T[i, 3]:10.3f}" + ((" | " + ("d" if P(i) else "θ")) if av else ""))
     return "\n".join(out)
 
 
@@ -829,7 +880,7 @@ def donnees_robot(rb, aide_max, solution):
     liens = []
     for m, (V, F) in enumerate(rb.meshes):
         liens.append(dict(m=m, couleur=PALETTE[m % len(PALETTE)], verts=np.round(V, 2).ravel().tolist(), faces=F.astype(int).ravel().tolist()))
-    return dict(nom=rb.nom, n=rb.n, taille=rb.taille, joints=[dict(nom=rb.noms[k], lo=rb.limites[k][0], hi=rb.limites[k][1]) for k in range(rb.n)],
+    return dict(nom=rb.nom, n=rb.n, taille=rb.taille, joints=[dict(nom=rb.noms[k], lo=rb.limites[k][0], hi=rb.limites[k][1], type=rb.types[k]) for k in range(rb.n)],
                 axes=[dict(p=p.tolist(), u=u.tolist()) for p, u in rb.AXES], outil=rb.OUTIL.tolist(),
                 rep0=dict(O=rb.REP0["O"].tolist(), x=rb.REP0["x"].tolist(), z=rb.REP0["z"].tolist()),
                 F0=[F.ravel().tolist() for F in rb.F0], liens=liens, aide_max=aide_max, solution=solution)
@@ -1094,7 +1145,7 @@ function axeTraces(){const L=R.taille*0.55,out=[];R.axes.slice(0,R.n).forEach((a
  const M=mul(F[k],invRigid(R.F0m[k]));const p0=ap(M,a.p),u=apv(M,a.u);
  for(let t=-L;t<=L;t+=L/20){xs.push(p0[0]+t*u[0]);ys.push(p0[1]+t*u[1]);zs.push(p0[2]+t*u[2])}
  out.push({type:'scatter3d',mode:'lines',x:xs,y:ys,z:zs,line:{color:'#FFCF00',width:5,dash:'dash'},showlegend:false,hovertemplate:'axe de l\'articulation '+(k+1)+'<br>x=%{x:.1f} y=%{y:.1f} z=%{z:.1f}<extra></extra>',meta:'axe'});
- const e=[p0[0]+L*u[0],p0[1]+L*u[1],p0[2]+L*u[2]];out.push({type:'scatter3d',mode:'text',x:[e[0]],y:[e[1]],z:[e[2]],text:['art. '+(k+1)],textfont:{color:'#b58f00',size:12},showlegend:false,hoverinfo:'skip',meta:'axe'})});return out}
+ const e=[p0[0]+L*u[0],p0[1]+L*u[1],p0[2]+L*u[2]];out.push({type:'scatter3d',mode:'text',x:[e[0]],y:[e[1]],z:[e[2]],text:[(R.joints[k].type=='P'?'prism. ':'art. ')+(k+1)],textfont:{color:'#b58f00',size:12},showlegend:false,hoverinfo:'skip',meta:'axe'})});return out}
 function frameTraces(){const out=[];if(!analyse)return out;const L=R.taille*0.1;
  analyse.reperes.forEach((r,k)=>{const M=mul(F[k],invRigid(R.F0m[k]));const O=ap(M,r.O),x=apv(M,r.x),z=apv(M,r.z),y=cross(z,x);
   [[x,'#d62728','x'],[y,'#2ca02c','y'],[z,'#1f4fd6','z']].forEach(([v,c,l])=>{out.push({type:'scatter3d',mode:'lines',x:[O[0],O[0]+L*v[0]],y:[O[1],O[1]+L*v[1]],z:[O[2],O[2]+L*v[2]],line:{color:c,width:6},showlegend:false,hoverinfo:'skip',meta:'rep'});
@@ -1139,11 +1190,11 @@ function rendreEdition(){
  document.querySelectorAll('#fbar button').forEach(b=>b.classList.toggle('cur',+b.dataset.i===cur))}
 function rendreResultats(){const d=analyse;
  const lg=$('log');lg.innerHTML='';d.etats.forEach(e=>{const sym={ok:'✔',warn:'⚠',err:'✘',todo:'…'}[e.statut];let h='<b>'+sym+' Repère '+e.i+'</b>';
-  if(e.params&&(e.statut=='ok'||e.statut=='warn'))h+=' → θ₀='+f2(e.params[0])+'° d='+f2(e.params[1])+' r='+f2(e.params[2])+' α='+f2(e.params[3])+'°';
+  if(e.params&&(e.statut=='ok'||e.statut=='warn'))h+=R.joints[e.i-1].type=='P'?' → θ='+f2(e.params[0])+'° d₀='+f2(e.params[1])+' (variable : d = d₀ + q) r='+f2(e.params[2])+' α='+f2(e.params[3])+'°':' → θ₀='+f2(e.params[0])+'° d='+f2(e.params[1])+' r='+f2(e.params[2])+' α='+f2(e.params[3])+'°';
   const div=document.createElement('div');div.className=e.statut;div.innerHTML=h+e.msgs.map(m=>'<div style="margin-left:14px;font-weight:normal">'+m+'</div>').join('');lg.appendChild(div)});
  if(d.ok){const div=document.createElement('div');div.className='ok';div.innerHTML='<b>Tous les repères respectent les règles DH.</b>';lg.appendChild(div)}
  const tb=document.querySelector('#tab tbody');tb.innerHTML='';for(let i=0;i<R.n;i++){const p=d.etats[i].params,ok=d.etats[i].statut=='ok'||d.etats[i].statut=='warn';
-  tb.innerHTML+='<tr><td>'+(i+1)+'</td>'+(p&&ok?p.map(v=>'<td>'+f2(v)+'</td>').join(''):'<td colspan=4 style="text-align:center;color:#aaa">—</td>')+'</tr>'}
+  tb.innerHTML+='<tr><td>'+(i+1)+'</td>'+(p&&ok?p.map((v,c)=>'<td'+(c==(R.joints[i].type=='P'?1:0)?' style="background:#fff4c2;font-weight:600"':'')+'>'+f2(v)+'</td>').join(''):'<td colspan=4 style="text-align:center;color:#aaa">—</td>')+'</tr>'}
  d.etats.forEach(e=>{const b=document.querySelector('#fbar button[data-i="'+e.i+'"]');b.className='f '+(e.statut=='todo'?'':e.statut)+(e.i==cur?' cur':'')})}
 function choisir(i){cur=i;if(meta)rendreEdition()}
 function majP(champ,val){P[cur]=Object.assign({},P[cur]||{},{[champ]:val});planifier()}
@@ -1155,10 +1206,10 @@ function majP(champ,val){P[cur]=Object.assign({},P[cur]||{},{[champ]:val});plani
  const fb=$('fbar');for(let i=1;i<=R.n;i++){const b=document.createElement('button');b.className='f'+(i==1?' cur':'');b.textContent=i;b.dataset.i=i;b.onclick=()=>choisir(i);fb.appendChild(b)}
  const ab=$('abar');for(let l=1;l<=R.aide_max;l++){const b=document.createElement('button');b.textContent='Aide niveau '+l;b.onclick=async()=>{const {texte}=await get('/api/aide?i='+cur+'&niveau='+l);const e=$('aide');e.style.display='block';e.textContent=texte};ab.appendChild(b)}
  if(R.aide_max<3){const s=document.createElement('span');s.className='hint';s.textContent=' (la réponse complète est désactivée)';ab.appendChild(s)}
- const sl=$('sliders');R.joints.forEach((j,k)=>{const d=document.createElement('div');d.className='row';d.innerHTML='<label>q'+(k+1)+'</label><input type="range" min="'+Math.max(j.lo,-180)+'" max="'+Math.min(j.hi,180)+'" step="1" value="0" data-k="'+k+'"><span style="width:44px;text-align:right" id="qv'+k+'">0°</span>';sl.appendChild(d)});
- sl.querySelectorAll('input').forEach(inp=>inp.oninput=async()=>{const k=+inp.dataset.k;q[k]=+inp.value;$('qv'+k).textContent=q[k]+'°';const {d}=await post('/api/pose',{q});F=d.F;
+ const sl=$('sliders');R.joints.forEach((j,k)=>{const d=document.createElement('div');d.className='row';const P=j.type=='P',un=P?' mm':'°',mn=Math.round(P?j.lo:Math.max(j.lo,-180)),mx=Math.round(P?j.hi:Math.min(j.hi,180)),v0=Math.min(Math.max(0,mn),mx);d.innerHTML='<label>'+(P?'d':'q')+(k+1)+'</label><input type="range" min="'+mn+'" max="'+mx+'" step="1" value="'+v0+'" data-k="'+k+'" data-un="'+un+'"><span style="width:58px;text-align:right" id="qv'+k+'">'+v0+un+'</span>';sl.appendChild(d)});
+ sl.querySelectorAll('input').forEach(inp=>inp.oninput=async()=>{const k=+inp.dataset.k;q[k]=+inp.value;$('qv'+k).textContent=q[k]+inp.dataset.un;const {d}=await post('/api/pose',{q});F=d.F;
   const gd=$('plot');const upd=meshTraces();Plotly.restyle(gd,{x:upd.map(t=>t.x),y:upd.map(t=>t.y),z:upd.map(t=>t.z)},[...Array(R.liens.length).keys()]);await draw(false)});
- $('bZero').onclick=async()=>{q=Array(R.n).fill(0);sl.querySelectorAll('input').forEach(i=>{i.value=0;$('qv'+i.dataset.k).textContent='0°'});F=R.F0.map(a=>a.slice());await draw(true);await construire()};
+ $('bZero').onclick=async()=>{q=Array(R.n).fill(0);sl.querySelectorAll('input').forEach(i=>{i.value=Math.min(Math.max(0,+i.min),+i.max);$('qv'+i.dataset.k).textContent=i.value+i.dataset.un});F=R.F0.map(a=>a.slice());await draw(true);await construire()};
   if(R.solution){$('prof').style.display='block';$('bSol').onclick=async()=>{const s=await get('/api/solution');P={};Object.keys(s.params).forEach(k=>P[k]={t:s.params[k].t,sign:s.params[k].sign,phi:s.params[k].phi});construire()}}
  $('ts').oninput=e=>{$('tn').value=Math.round(+e.target.value*10)/10;majP('t',+e.target.value)};
  $('tn').oninput=e=>{if(e.target.value==='')return;$('ts').value=e.target.value;majP('t',+e.target.value)};

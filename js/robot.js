@@ -32,7 +32,7 @@ export function lireURDF(doc) {
     const lim = premier(j, 'limit'), ax = premier(j, 'axis');
     return {
       name: attr(j, 'name'), type: attr(j, 'type'), parent: attr(premier(j, 'parent'), 'link'), child: attr(premier(j, 'child'), 'link'),
-      T: origine(j), axe: vec(attr(ax, 'xyz'), [1, 0, 0]),
+      T: origine(j), axe: vec(attr(ax, 'xyz'), [1, 0, 0]), mimic: !!premier(j, 'mimic'),
       lo: lim && attr(lim, 'lower') !== null ? Number(attr(lim, 'lower')) : null,
       hi: lim && attr(lim, 'upper') !== null ? Number(attr(lim, 'upper')) : null,
     };
@@ -47,7 +47,9 @@ export const TOL_SECANT = 0.1; // mm : distance entre axes sous laquelle ils son
 const MOBILES = ['revolute', 'continuous', 'prismatic'];
 const ROT = ['revolute', 'continuous'];
 
-// Toutes les chaînes racine -> feuille, tronquées après la dernière rotoïde (+ articulations fixes qui suivent)
+// Toutes les chaînes racine -> feuille, tronquées après la dernière rotoïde (+ articulations fixes qui suivent).
+// Une prismatique en fin de chaîne (SCARA RRP, doigt unique…) est conservée seulement si elle est seule à partir de son lien parent
+// et ne copie pas une autre articulation (mimic) : on évite ainsi de prendre les doigts d'une pince pour une articulation du bras.
 export function brancheDisponibles(urdf, base = null) {
   const { liens, joints } = urdf;
   const parParent = {};
@@ -68,21 +70,28 @@ export function brancheDisponibles(urdf, base = null) {
   const branches = chemins.map((ch) => {
     let derniere = -1;
     ch.forEach((j, k) => { if (ROT.includes(j.type)) derniere = k; });
-    if (derniere < 0) return { tip: ch.length ? ch[ch.length - 1].child : base, nRot: 0, valide: false, raison: 'aucune articulation rotoïde', joints: ch };
+    // prismatiques terminales conservées si elles sont « seules » (voir ci-dessus)
+    let k = derniere + 1;
+    while (k < ch.length && (ch[k].type === 'fixed' || (ch[k].type === 'prismatic' && !ch[k].mimic && (parParent[ch[k].parent] || []).length === 1))) {
+      if (ch[k].type === 'prismatic') derniere = k;
+      k++;
+    }
+    if (derniere < 0) return { tip: ch.length ? ch[ch.length - 1].child : base, nRot: 0, nPris: 0, valide: false, raison: 'aucune articulation mobile (rotoïde ou prismatique)', joints: ch };
     let fin = derniere;
     while (fin + 1 < ch.length && ch[fin + 1].type === 'fixed') fin++;
     const util = ch.slice(0, fin + 1);
-    const mauvais = util.find((j) => !['fixed', ...ROT].includes(j.type));
+    const mauvais = util.find((j) => !['fixed', ...MOBILES].includes(j.type));
     return {
-      tip: util[util.length - 1].child, nRot: util.filter((j) => ROT.includes(j.type)).length, joints: util,
-      valide: !mauvais, raison: mauvais ? `articulation « ${mauvais.name} » de type ${mauvais.type} non gérée (rotoïdes uniquement)` : '',
+      tip: util[util.length - 1].child, nRot: util.filter((j) => ROT.includes(j.type)).length, nPris: util.filter((j) => j.type === 'prismatic').length, joints: util,
+      valide: !mauvais, raison: mauvais ? `articulation « ${mauvais.name} » de type ${mauvais.type} non gérée (rotoïdes et prismatiques uniquement)` : '',
     };
   });
   // dédoublonnage (plusieurs feuilles qui partagent la même chaîne utile)
   const vus = new Set();
   const uniques = branches.filter((b) => { const k = b.joints.map((j) => j.name).join('>'); if (vus.has(k)) return false; vus.add(k); return true; });
   const bonnes = uniques.filter((b) => b.valide);
-  const defaut = bonnes.length ? bonnes.reduce((a, b) => (b.nRot > a.nRot ? b : a)) : null;
+  // branche par défaut : le plus d'articulations rotoïdes, puis le moins de prismatiques (le bras plutôt que les doigts de pince)
+  const defaut = bonnes.length ? bonnes.reduce((a, b) => (b.nRot > a.nRot || (b.nRot === a.nRot && b.nPris < a.nPris) ? b : a)) : null;
   return { base, branches: uniques, defaut };
 }
 
@@ -97,7 +106,7 @@ export class Robot {
     this.infoBranches = info;
     this.base = info.base;
     this.tip = br.tip;
-    this.ORIG = []; this.AXL = []; this.noms = []; this.limites = [];
+    this.ORIG = []; this.AXL = []; this.noms = []; this.limites = []; this.types = [];
     const attache = [{ lien: info.base, m: 0, Tl: I4() }];
     let Tacc = I4();
     let m = 0;
@@ -110,7 +119,9 @@ export class Robot {
         this.ORIG.push(mat4Mul(Tacc, To));
         this.AXL.push(unit(j.axe));
         this.noms.push(j.name);
-        this.limites.push(j.type === 'continuous' || j.lo === null || j.hi === null ? [-180, 180] : [deg(j.lo), deg(j.hi)]);
+        this.types.push(j.type === 'prismatic' ? 'P' : 'R');
+        if (j.type === 'prismatic') this.limites.push(j.lo === null || j.hi === null ? [-100, 100] : [j.lo * 1000, j.hi * 1000]);   // mm
+        else this.limites.push(j.type === 'continuous' || j.lo === null || j.hi === null ? [-180, 180] : [deg(j.lo), deg(j.hi)]);      // degrés
         m++;
         Tacc = I4();
         attache.push({ lien: j.child, m, Tl: I4() });
@@ -159,11 +170,13 @@ export class Robot {
     this.taille = this._taille();
   }
 
-  fk(qDeg) {
+  // q : degrés pour une rotoïde, millimètres pour une prismatique
+  fk(q) {
     const F = [I4()];
     for (let k = 0; k < this.n; k++) {
-      const R = rotAxe(this.AXL[k], rad(qDeg[k] || 0));
-      F.push(mat4Mul(mat4Mul(F[F.length - 1], this.ORIG[k]), mat4From(R)));
+      const v = q[k] || 0;
+      const mouv = this.types[k] === 'P' ? mat4From(null, mul(this.AXL[k], v)) : mat4From(rotAxe(this.AXL[k], rad(v)));
+      F.push(mat4Mul(mat4Mul(F[F.length - 1], this.ORIG[k]), mouv));
     }
     return F;
   }
@@ -407,6 +420,7 @@ export class Robot {
     if (niveau >= 3) {
       const p = Robot.parametres(R[i - 1], R[i]);
       out.push(`Niveau 3 — O_${i} = [${r1(R[i].O)}] mm ; x_${i} = [${r3(R[i].x)}] → θ0=${p[0].toFixed(2)}° d=${p[1].toFixed(2)} r=${p[2].toFixed(2)} α=${p[3].toFixed(2)}°`);
+      if (this.types[i - 1] === 'P') out.push(`Articulation ${i} prismatique : la variable est d_${i} = d0_${i} + q_${i} (θ_${i} reste constant) ; d0 est la valeur lorsque q_${i} = 0.`);
     }
     return out.join('\n');
   }
@@ -417,14 +431,14 @@ export class Robot {
     // repère 0 imposé (pas toujours confondu avec la base : z0 est l'axe de l'articulation 1, parfois orienté vers le bas)
     const { O: O0, x: x0, z: z0 } = this.REP0, y0 = cross(z0, x0);
     const B = mat4From([x0[0], y0[0], z0[0], x0[1], y0[1], z0[1], x0[2], y0[2], z0[2]], O0);
-    const dhFk = (q) => { let M = B.slice(); return T.map((l, k) => (M = mat4Mul(M, matriceDH(l[0] + q[k], l[1], l[2], l[3])))); };
+    const dhFk = (q) => { let M = B.slice(); return T.map((l, k) => { const P = this.types[k] === 'P'; return (M = mat4Mul(M, matriceDH(l[0] + (P ? 0 : q[k]), l[1] + (P ? q[k] : 0), l[2], l[3]))); }); };
     let graine = 12345;
     const alea = () => { graine = (graine * 1664525 + 1013904223) % 4294967296; return graine / 4294967296; };
     const T0 = dhFk(new Array(this.n).fill(0));
     const C0 = T0.map((t, k) => mat4Mul(mat4InvRigid(t), this.F0[k + 1]));
     const pire = Array.from({ length: this.n }, () => [0, 0]);
     for (let s = 0; s < nTests; s++) {
-      const q = this.limites.map(([a, b]) => { const lo = Math.max(a, -180), hi = Math.min(b, 180); return lo + alea() * (hi - lo); });
+      const q = this.limites.map(([a, b], k) => { const lo = this.types[k] === 'P' ? a : Math.max(a, -180), hi = this.types[k] === 'P' ? b : Math.min(b, 180); return lo + alea() * (hi - lo); });
       const Ts = dhFk(q), F = this.fk(q);
       for (let k = 0; k < this.n; k++) {
         const C = mat4Mul(mat4InvRigid(Ts[k]), F[k + 1]);
@@ -463,19 +477,26 @@ export function matriceDH(thetaDeg, d, r, alphaDeg) {
 // ------------------------------------------------------------------ exports du tableau
 const nettoyer = (v) => (Math.abs(v) < 0.005 ? 0 : v); // écarte le bruit numérique (URDF aux angles arrondis)
 const fmt = (v, nd = 3) => { let s = nettoyer(v).toFixed(nd); if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, ''); return s === '-0' || s === '' ? '0' : s; };
-export function formaterTableau(T, format, nomRobot = 'robot') {
-  if (format === 'csv') return 'i,theta0_deg,d_mm,r_mm,alpha_deg\n' + T.map((l, i) => `${i + 1},${fmt(l[0])},${fmt(l[1])},${fmt(l[2])},${fmt(l[3])}`).join('\n');
+export function formaterTableau(T, format, nomRobot = 'robot', types = null) {
+  const P = (k) => !!types && types[k] === 'P';
+  const avecVar = !!types && types.some((t) => t === 'P');   // colonne « variable » seulement s'il y a une prismatique
+  const nomVar = (k) => (P(k) ? 'd' : 'theta');
+  if (format === 'csv') return 'i,theta0_deg,d_mm,r_mm,alpha_deg' + (avecVar ? ',variable' : '') + '\n' + T.map((l, i) => `${i + 1},${fmt(l[0])},${fmt(l[1])},${fmt(l[2])},${fmt(l[3])}${avecVar ? ',' + nomVar(i) : ''}`).join('\n');
   if (format === 'json') {
     return JSON.stringify({
       robot: nomRobot, convention: 'DH standard', unites: { longueur: 'mm', angle: 'deg' },
-      lignes: T.map((l, i) => ({ i: i + 1, theta0: +nettoyer(l[0]).toFixed(3), d: +nettoyer(l[1]).toFixed(3), r: +nettoyer(l[2]).toFixed(3), alpha: +nettoyer(l[3]).toFixed(3) })),
+      lignes: T.map((l, i) => {
+        const o = { i: i + 1, theta0: +nettoyer(l[0]).toFixed(3), d: +nettoyer(l[1]).toFixed(3), r: +nettoyer(l[2]).toFixed(3), alpha: +nettoyer(l[3]).toFixed(3) };
+        if (avecVar) o.variable = nomVar(i);
+        return o;
+      }),
     }, null, 2);
   }
   if (format === 'tex') {
-    const lg = T.map((l, i) => `${i + 1} & ${fmt(l[0], 2)} & ${fmt(l[1], 2)} & ${fmt(l[2], 2)} & ${fmt(l[3], 2)} \\\\`).join('\n');
-    return '\\begin{tabular}{c|cccc}\n$i$ & $\\theta_{0,i}$ (°) & $d_i$ (mm) & $r_i$ (mm) & $\\alpha_i$ (°) \\\\ \\hline\n' + lg + '\n\\end{tabular}';
+    const lg = T.map((l, i) => `${i + 1} & ${fmt(l[0], 2)} & ${fmt(l[1], 2)} & ${fmt(l[2], 2)} & ${fmt(l[3], 2)}${avecVar ? ' & ' + (P(i) ? '$d$' : '$\\theta$') : ''} \\\\`).join('\n');
+    return `\\begin{tabular}{c|cccc${avecVar ? 'c' : ''}}\n$i$ & $\\theta_{0,i}$ (°) & $d_i$ (mm) & $r_i$ (mm) & $\\alpha_i$ (°)${avecVar ? ' & variable' : ''} \\\\ \\hline\n` + lg + '\n\\end{tabular}';
   }
-  const out = [`Tableau DH standard — ${nomRobot}`, ' i |  theta0 (°) |    d (mm) |    r (mm) |  alpha (°)', '---+-------------+-----------+-----------+-----------'];
-  T.forEach((l, i) => out.push(`${String(i + 1).padStart(2)} | ${l[0].toFixed(3).padStart(11)} | ${l[1].toFixed(3).padStart(9)} | ${l[2].toFixed(3).padStart(9)} | ${l[3].toFixed(3).padStart(10)}`));
+  const out = [`Tableau DH standard — ${nomRobot}`, ' i |  theta0 (°) |    d (mm) |    r (mm) |  alpha (°)' + (avecVar ? ' | variable' : ''), '---+-------------+-----------+-----------+-----------' + (avecVar ? '+---------' : '')];
+  T.forEach((l, i) => out.push(`${String(i + 1).padStart(2)} | ${l[0].toFixed(3).padStart(11)} | ${l[1].toFixed(3).padStart(9)} | ${l[2].toFixed(3).padStart(9)} | ${l[3].toFixed(3).padStart(10)}` + (avecVar ? ` | ${P(i) ? 'd' : 'θ'}` : '')));
   return out.join('\n');
 }

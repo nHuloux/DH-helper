@@ -164,7 +164,7 @@ export class Viewer {
       const ln = this._ligne(a, b, sel ? '#e0a800' : '#FFCF00', sel ? 4 : 2.5, [L / 30, L / 60]);
       ln.userData.axe = k;
       this.grAxes[k].add(ln);
-      const s = etiquette(`art. ${k + 1}`, '#a07800', robot.taille * 0.045, true);
+      const s = etiquette(`${robot.types && robot.types[k] === 'P' ? 'prism.' : 'art.'} ${k + 1}`, '#a07800', robot.taille * 0.045, true);
       s.position.set(b[0] + u[0] * robot.taille * 0.03, b[1] + u[1] * robot.taille * 0.03, b[2] + u[2] * robot.taille * 0.03);
       this.grAxes[k].add(s);
     }
